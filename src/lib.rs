@@ -14,6 +14,7 @@ use transport::Arrived;
 use transport::Directions;
 use transport::Transport;
 use transport::error::{Result, classify};
+use transport::socket;
 
 pub struct TcpTransport {
     bind: String,
@@ -45,14 +46,7 @@ impl TcpTransport {
     ///
     /// Where the address is taken, malformed, or not permitted.
     pub fn bind(&self) -> Result<(TcpListener, String)> {
-        let listener =
-            TcpListener::bind(&self.bind).map_err(|e| classify("binding the listener", &e))?;
-
-        let local = listener
-            .local_addr()
-            .map_err(|e| classify("reading the bound address", &e))?;
-
-        Ok((listener, local.to_string()))
+        socket::bind_tcp(&self.bind)
     }
 
     /// Take one connection from an already-bound listener.
