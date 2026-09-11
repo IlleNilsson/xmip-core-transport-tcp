@@ -14,8 +14,10 @@ use transport::Arrived;
 use transport::Directions;
 use transport::Transport;
 use transport::error::{Result, classify};
+use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
 
+#[derive(Clone)]
 pub struct TcpTransport {
     bind: String,
     accept_timeout: Option<Duration>,
@@ -100,6 +102,47 @@ impl Transport for TcpTransport {
         stream
             .flush()
             .map_err(|e| classify("flushing to the peer", &e))
+    }
+}
+
+impl TcpTransport {
+    /// Both ends on this machine: an ephemeral local port, the loopback
+    /// timeout on the accept.
+    #[must_use]
+    pub fn loopback() -> Self {
+        Self::new("127.0.0.1:0").timing_out_after(LOOPBACK_TIMEOUT)
+    }
+}
+
+/// A bound listener waiting for its one connection.
+struct Listening {
+    transport: TcpTransport,
+    listener: TcpListener,
+    address: String,
+}
+
+impl FarEnd for Listening {
+    fn address(&self) -> &str {
+        &self.address
+    }
+
+    fn take_one(self: Box<Self>) -> Result<Arrived> {
+        self.transport.accept_one(&self.listener)
+    }
+}
+
+impl Loopback for TcpTransport {
+    fn far_end(&self) -> Result<Box<dyn FarEnd>> {
+        let (listener, address) = self.bind()?;
+        Ok(Box::new(Listening {
+            transport: self.clone(),
+            listener,
+            address,
+        }))
+    }
+
+    fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
+        Self::new("127.0.0.1:0").send(address, payload)
     }
 }
 
