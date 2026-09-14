@@ -14,6 +14,7 @@ use transport::Arrived;
 use transport::Directions;
 use transport::Transport;
 use transport::error::{Result, classify};
+use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
 
@@ -114,31 +115,16 @@ impl TcpTransport {
     }
 }
 
-/// A bound listener waiting for its one connection.
-struct Listening {
-    transport: TcpTransport,
-    listener: TcpListener,
-    address: String,
-}
-
-impl FarEnd for Listening {
-    fn address(&self) -> &str {
-        &self.address
-    }
-
-    fn take_one(self: Box<Self>) -> Result<Arrived> {
-        self.transport.accept_one(&self.listener)
+impl Accepting for TcpTransport {
+    fn take_one(&self, listener: &TcpListener) -> Result<Arrived> {
+        self.accept_one(listener)
     }
 }
 
 impl Loopback for TcpTransport {
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
         let (listener, address) = self.bind()?;
-        Ok(Box::new(Listening {
-            transport: self.clone(),
-            listener,
-            address,
-        }))
+        Ok(Box::new(Listening::new(self.clone(), listener, address)))
     }
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
