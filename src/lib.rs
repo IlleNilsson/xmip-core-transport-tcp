@@ -7,7 +7,7 @@
 //! identity rather than an absent one.
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::time::Duration;
 
 use transport::Arrived;
@@ -58,15 +58,10 @@ impl TcpTransport {
     ///
     /// Where the connection could not be accepted or read to its end.
     pub fn accept_one(&self, listener: &TcpListener) -> Result<Arrived> {
-        let (mut stream, peer) = listener
-            .accept()
-            .map_err(|e| classify("accepting a connection", &e))?;
-
-        if let Some(timeout) = self.accept_timeout {
-            stream
-                .set_read_timeout(Some(timeout))
-                .map_err(|e| classify("setting the read timeout", &e))?;
-        }
+        // Through the capability's helper, so the wait for the connection is
+        // bounded as well as the reads. This did its own `accept` until
+        // 2026-09-20 and blocked in it for good when nothing connected.
+        let (mut stream, peer) = socket::accept_tcp(listener, self.accept_timeout)?;
 
         let mut bytes = Vec::new();
         stream
@@ -93,8 +88,10 @@ impl Transport for TcpTransport {
     }
 
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
-        let mut stream =
-            TcpStream::connect(target).map_err(|e| classify("connecting to the peer", &e))?;
+        // Through the capability's helper, so the connect is bounded like the
+        // accept. This used `TcpStream::connect` bare until 2026-09-20 and
+        // waited on the operating system's schedule, which is not a timeout.
+        let mut stream = socket::connect_tcp(target, self.accept_timeout)?;
 
         stream
             .write_all(bytes)
