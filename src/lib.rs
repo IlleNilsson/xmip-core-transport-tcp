@@ -15,6 +15,7 @@ use transport::Configured;
 use transport::Directions;
 use transport::Transport;
 use transport::error::{Result, classify};
+use transport::kept::Kept;
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
@@ -24,6 +25,8 @@ use xcore::settings::{Applies, Kind, Presence, Setting, Settings};
 pub struct TcpTransport {
     bind: String,
     accept_timeout: Option<Duration>,
+    /// The listener the first receive binds, and every receive takes from.
+    receiving: Kept<TcpListener>,
 }
 
 impl TcpTransport {
@@ -32,6 +35,7 @@ impl TcpTransport {
         Self {
             bind: bind.into(),
             accept_timeout: None,
+            receiving: Kept::new(),
         }
     }
 
@@ -80,10 +84,11 @@ impl Transport for TcpTransport {
         Directions::BOTH
     }
 
+    /// One connection read to its end, from the listener the first receive
+    /// bound and kept.
     fn receive(&self) -> Result<Vec<Arrived>> {
-        let (listener, _) = self.bind()?;
-
-        Ok(vec![self.accept_one(&listener)?])
+        let listener = self.receiving.bound(|| self.bind())?;
+        Ok(vec![self.accept_one(listener)?])
     }
 
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
@@ -182,6 +187,24 @@ mod tests {
 
         assert_eq!(arrived.bytes, b"hello over tcp");
         assert!(arrived.origin_uri.starts_with("tcp://127.0.0.1:"));
+    }
+
+    #[test]
+    fn every_receive_takes_from_the_listener_the_first_bound() {
+        // Every send lands before any receive: queued on the kept listener,
+        // not refused, and taken in order by receives that bind nothing.
+        let receiver = TcpTransport::loopback();
+        receiver.receiving.bound(|| receiver.bind()).expect("bound");
+        let address = receiver.receiving.address().expect("address");
+        for round in 0..5u8 {
+            TcpTransport::loopback()
+                .send(address, &[round])
+                .expect("sent");
+        }
+        for round in 0..5u8 {
+            let arrived = receiver.receive().expect("received");
+            assert_eq!(arrived[0].bytes, [round]);
+        }
     }
 
     #[test]
