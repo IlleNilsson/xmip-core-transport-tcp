@@ -9,6 +9,8 @@ Lifted out of the capability crate on 2026-09-07, where it had lived as
 the trait, the error vocabulary and the shared wire helpers; nothing in it names
 a protocol.
 
+A Receive Location keeps its listener, bound on the first receive (`transport::kept::Kept`): a peer that connects between two receives is queued and taken by the next, where until 2026-09-27 each receive bound a listener of its own and a peer between receives was refused.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it
