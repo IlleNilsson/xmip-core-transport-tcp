@@ -6,7 +6,7 @@
 //! at minimum the peer address, which ADR-0019 clause 8 calls an *inferred*
 //! identity rather than an absent one.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpListener;
 use std::time::Duration;
 
@@ -65,10 +65,7 @@ impl TcpTransport {
         // 2026-09-20 and blocked in it for good when nothing connected.
         let (mut stream, peer) = socket::accept_tcp(listener, self.accept_timeout)?;
 
-        let mut bytes = Vec::new();
-        stream
-            .read_to_end(&mut bytes)
-            .map_err(|e| classify("reading the connection", &e))?;
+        let bytes = net::read::to_end(&mut stream, net::MAX_BODY)?;
 
         Ok(Arrived::new(format!("tcp://{peer}"), bytes))
     }
