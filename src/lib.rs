@@ -11,12 +11,14 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 use transport::Arrived;
+use transport::Configured;
 use transport::Directions;
 use transport::Transport;
 use transport::error::{Result, classify};
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
+use xcore::settings::{Applies, Kind, Presence, Setting, Settings};
 
 #[derive(Clone)]
 pub struct TcpTransport {
@@ -103,6 +105,30 @@ impl Transport for TcpTransport {
     }
 }
 
+impl Configured for TcpTransport {
+    /// The address is where a Receive Location listens and where a Send
+    /// Location connects; the one setting bounds the wait for either.
+    const SETTINGS: &'static Settings = &Settings {
+        technology: env!("CARGO_PKG_NAME"),
+        settings: &[Setting {
+            name: "timeout",
+            kind: Kind::Duration,
+            presence: Presence::Optional,
+            meaning: "How long a connection is waited for, accepted or opened, and how long \
+                      one that stops sending is waited on; unbounded when left out.",
+            applies: Applies::Both,
+        }],
+    };
+
+    fn configured(address: &str, settings: &xcore::settings::Read) -> Result<Self> {
+        let transport = Self::new(address);
+        Ok(match settings.optional_duration("timeout") {
+            Some(timeout) => transport.timing_out_after(timeout),
+            None => transport,
+        })
+    }
+}
+
 impl TcpTransport {
     /// Both ends on this machine: an ephemeral local port, the loopback
     /// timeout on the accept.
@@ -131,6 +157,17 @@ impl Loopback for TcpTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xcore::settings::Given;
+
+    #[test]
+    fn tcp_declares_its_settings_and_reads_through_them() {
+        assert_eq!(TcpTransport::SETTINGS.problems(), Vec::<String>::new());
+        let given = [("timeout".to_string(), Given::Text("250ms".to_string()))];
+        let transport =
+            TcpTransport::open("127.0.0.1:0", Applies::Receive, &given).expect("configured");
+        assert_eq!(transport.accept_timeout, Some(Duration::from_millis(250)));
+        assert!(TcpTransport::open("127.0.0.1:0", Applies::Send, &[]).is_ok());
+    }
 
     #[test]
     fn tcp_round_trip_carries_bytes_and_peer() {
