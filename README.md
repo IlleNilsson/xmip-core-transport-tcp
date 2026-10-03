@@ -11,6 +11,14 @@ a protocol.
 
 A Receive Location keeps its listener, bound on the first receive (`transport::kept::Kept`): a peer that connects between two receives is queued and taken by the next, where until 2026-09-27 each receive bound a listener of its own and a peer between receives was refused.
 
+## Acknowledgement
+
+Acceptance is at-most-once here. Raw TCP frames a Stream by the connection
+itself, closed to end it, and has no application-level reply: the sender's
+write completed when its kernel took the bytes, so there is nobody left to
+tell how the receive cycle ended. The body is the connection, read to its end
+as the runtime asks, never whole in memory.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it

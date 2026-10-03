@@ -5,11 +5,18 @@
 //! The pushed case: a caller connects, so a transport-level identity exists —
 //! at minimum the peer address, which ADR-0019 clause 8 calls an *inferred*
 //! identity rather than an absent one.
+//!
+//! **Acceptance is at-most-once here.** Raw TCP frames a Stream by the
+//! connection itself, closed to end it, and has no application-level reply:
+//! the sender's write completed when its kernel took the bytes, so there is
+//! nobody left to tell the verdict. The body is the connection, read to its
+//! end as the runtime asks.
 
 use std::io::Write;
 use std::net::TcpListener;
 use std::time::Duration;
 
+use transport::Acknowledgement;
 use transport::Arrived;
 use transport::Configured;
 use transport::Directions;
@@ -19,7 +26,12 @@ use transport::kept::Kept;
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
+use transport::taken::Taken;
 use xcore::settings::{Applies, Kind, Presence, Setting, Settings};
+
+/// Why a TCP arrival cannot be acknowledged after the receive cycle.
+pub const AT_MOST_ONCE: &str = "raw TCP has no reply: the sender's write completed when its \
+                                kernel took the bytes, and closing the connection ends the Stream";
 
 #[derive(Clone)]
 pub struct TcpTransport {
@@ -58,20 +70,23 @@ impl TcpTransport {
         socket::bind_tcp(&self.bind)
     }
 
-    /// Take one connection from an already-bound listener.
+    /// Take one connection from an already-bound listener. Its body is the
+    /// connection itself, read to its end as the runtime asks, never whole in
+    /// memory; acceptance is at-most-once ([`AT_MOST_ONCE`]).
     ///
     /// # Errors
     ///
-    /// Where the connection could not be accepted or read to its end.
+    /// Where the connection could not be accepted.
     pub fn accept_one(&self, listener: &TcpListener) -> Result<Arrived> {
         // Through the capability's helper, so the wait for the connection is
         // bounded as well as the reads. This did its own `accept` until
         // 2026-09-20 and blocked in it for good when nothing connected.
-        let (mut stream, peer) = socket::accept_tcp(listener, self.accept_timeout)?;
-
-        let bytes = net::read::to_end(&mut stream, net::MAX_BODY)?;
-
-        Ok(Arrived::new(format!("tcp://{peer}"), bytes))
+        let (stream, peer) = socket::accept_tcp(listener, self.accept_timeout)?;
+        Ok(Arrived::new(
+            format!("tcp://{peer}"),
+            stream,
+            Acknowledgement::at_most_once(AT_MOST_ONCE),
+        ))
     }
 }
 
@@ -84,8 +99,13 @@ impl Transport for TcpTransport {
         Directions::BOTH
     }
 
-    /// One connection read to its end, from the listener the first receive
-    /// bound and kept.
+    fn arrivals(&self) -> transport::Arrivals {
+        transport::Arrivals::Unordered("each connection is a Stream of its own")
+    }
+
+    /// One connection, from the listener the first receive bound and kept,
+    /// read to its end by the runtime. Acceptance is at-most-once here: raw
+    /// TCP has no reply to defer ([`AT_MOST_ONCE`]).
     fn receive(&self) -> Result<Vec<Arrived>> {
         let listener = self.receiving.bound(|| self.bind())?;
         Ok(vec![self.accept_one(listener)?])
@@ -141,8 +161,8 @@ impl TcpTransport {
 }
 
 impl Accepting for TcpTransport {
-    fn take_one(self, listener: &TcpListener) -> Result<Arrived> {
-        self.accept_one(listener)
+    fn take_one(self, listener: &TcpListener) -> Result<Taken> {
+        self.accept_one(listener)?.taken()
     }
 }
 
@@ -183,6 +203,8 @@ mod tests {
         });
 
         let arrived = receiver.accept_one(&listener).expect("accepting");
+        assert!(!arrived.defers(), "raw TCP is at-most-once");
+        let arrived = arrived.taken().expect("read to its end");
         sender.join().expect("the sending thread panicked");
 
         assert_eq!(arrived.bytes, b"hello over tcp");
@@ -202,8 +224,9 @@ mod tests {
                 .expect("sent");
         }
         for round in 0..5u8 {
-            let arrived = receiver.receive().expect("received");
-            assert_eq!(arrived[0].bytes, [round]);
+            let mut arrived = receiver.receive().expect("received");
+            let taken = arrived.remove(0).taken().expect("taken");
+            assert_eq!(taken.bytes, [round]);
         }
     }
 
