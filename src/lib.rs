@@ -17,6 +17,7 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 use transport::Acknowledgement;
+use transport::ArrivalIdentity;
 use transport::Arrived;
 use transport::Configured;
 use transport::Directions;
@@ -86,7 +87,8 @@ impl TcpTransport {
             format!("tcp://{peer}"),
             stream,
             Acknowledgement::at_most_once(AT_MOST_ONCE),
-        ))
+        )
+        .from_peer(peer))
     }
 }
 
@@ -167,6 +169,10 @@ impl Accepting for TcpTransport {
 }
 
 impl Loopback for TcpTransport {
+    fn arrival_identity(&self) -> ArrivalIdentity {
+        ArrivalIdentity::PEER
+    }
+
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
         Ok(Box::new(Listening::new(self.clone(), self.bind()?)))
     }
@@ -209,6 +215,11 @@ mod tests {
 
         assert_eq!(arrived.bytes, b"hello over tcp");
         assert!(arrived.origin_uri.starts_with("tcp://127.0.0.1:"));
+        ArrivalIdentity::PEER
+            .check(&arrived)
+            .expect("the peer, as the gates read it");
+        let (_, peer) = arrived.observed.first().expect("observed");
+        assert_eq!(format!("tcp://{peer}"), arrived.origin_uri);
     }
 
     #[test]
@@ -236,5 +247,16 @@ mod tests {
         // answers — no artefact at all, versus an artefact the protocol cannot
         // lock.
         assert!(TcpTransport::new("127.0.0.1:0").claims().is_none());
+    }
+
+    #[test]
+    fn a_round_hands_the_arrival_who_sent_it() {
+        // `Loopback::round` holds the far end's arrival to what
+        // `arrival_identity` says it carries.
+        let taken = TcpTransport::loopback()
+            .round(b"who sent this")
+            .expect("a round");
+        assert_eq!(taken.bytes, b"who sent this");
+        assert!(!taken.observed.is_empty(), "{taken:?}");
     }
 }
