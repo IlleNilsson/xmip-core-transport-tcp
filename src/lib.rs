@@ -105,6 +105,10 @@ impl Transport for TcpTransport {
         transport::Arrivals::Unordered("each connection is a Stream of its own")
     }
 
+    fn waiting(&self) -> transport::Waiting {
+        transport::Waiting::Waits("the accept waits for a connection")
+    }
+
     /// One connection, from the listener the first receive bound and kept,
     /// read to its end by the runtime. Acceptance is at-most-once here: raw
     /// TCP has no reply to defer ([`AT_MOST_ONCE`]).
