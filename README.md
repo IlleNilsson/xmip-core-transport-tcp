@@ -17,7 +17,10 @@ Acceptance is at-most-once here. Raw TCP frames a Stream by the connection
 itself, closed to end it, and has no application-level reply: the sender's
 write completed when its kernel took the bytes, so there is nobody left to
 tell how the receive cycle ended. The body is the connection, read to its end
-as the runtime asks, never whole in memory.
+as the runtime asks, never whole in memory. Because the sender is done
+already, a node's stop drains what is queued in the listener's backlog
+before it closes it (`xmip-core-runtime`'s `receiving::drain`; ADR-0018,
+amendment 2026-10-15).
 
 ## Toolchain
 
