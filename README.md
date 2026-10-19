@@ -11,6 +11,9 @@ a protocol.
 
 A Receive Location keeps its listener, bound on the first receive (`transport::kept::Kept`): a peer that connects between two receives is queued and taken by the next, where until 2026-09-27 each receive bound a listener of its own and a peer between receives was refused.
 
+A send writes the Message to its connection as it is read from the Ledger, a
+piece at a time, never whole in memory (`Sending::Streamed`, 2026-10-19).
+
 ## Acknowledgement
 
 Acceptance is at-most-once here. Raw TCP frames a Stream by the connection
