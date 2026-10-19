@@ -14,6 +14,22 @@ A Receive Location keeps its listener, bound on the first receive (`transport::k
 A send writes the Message to its connection as it is read from the Ledger, a
 piece at a time, never whole in memory (`Sending::Streamed`, 2026-10-19).
 
+## TLS
+
+A Receive Location whose settings say `tls = true` terminates TLS on every
+connection, with the guard the node hands every transport it builds
+(`transport::Guard`): the node's `[provision.receive]` certificate, and the
+client's verified against the anchors given there. The handshake finishes
+before a byte of content is read, and what it proved — the client
+certificate's subject, issuer and fingerprint, and that it verified them —
+is written on the arrival under `context::property`'s `tls.peer.*` names,
+for the identity gates to claim and record as `mutual-tls`. A client the
+handshake refuses is that client's failure alone, and the Location takes the
+next. A Location asking for TLS on a node with no `receive` certificate is
+refused as it is built, and a build without the `tls` feature refuses
+`tls = true` in words (ADR-0033, amendment 2026-10-19). Sending over TLS is
+not built.
+
 ## Acknowledgement
 
 Acceptance is at-most-once here. Raw TCP frames a Stream by the connection
