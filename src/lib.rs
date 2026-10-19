@@ -11,6 +11,16 @@
 //! the sender's write completed when its kernel took the bytes, so there is
 //! nobody left to tell the verdict. The body is the connection, read to its
 //! end as the runtime asks.
+//!
+//! **TLS, where the Location says so.** A Receive Location whose `tls`
+//! setting is `true` terminates TLS on every connection with the guard the
+//! node hands it (`transport::Guard`): the node's `receive` certificate,
+//! and the client's verified against the anchors the node was given. The
+//! handshake finishes before a byte of content is read, and what it proved
+//! of the client — its certificate's subject, issuer and fingerprint, and
+//! that it verified them — is written on the arrival for the identity gates
+//! (ADR-0033, amendment 2026-10-19). A client the handshake refuses is
+//! refused there, and the Location takes the next.
 
 use std::io::Write;
 use std::net::TcpListener;
@@ -28,16 +38,26 @@ use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
 use transport::taken::Taken;
-use xcore::settings::{Applies, Kind, Presence, Setting, Settings};
+use xcore::settings::{Applies, Fixed, Kind, Presence, Setting, Settings};
 
 /// Why a TCP arrival cannot be acknowledged after the receive cycle.
 pub const AT_MOST_ONCE: &str = "raw TCP has no reply: the sender's write completed when its \
                                 kernel took the bytes, and closing the connection ends the Stream";
 
+/// Why a Location asking for TLS is refused where the node presents no
+/// certificate on receive.
+pub const NO_RECEIVE_CERTIFICATE: &str = "the Location terminates TLS (tls = true) and the node \
+     has no receive certificate to present: give it [provision.receive]";
+
 #[derive(Clone)]
 pub struct TcpTransport {
     bind: String,
     accept_timeout: Option<Duration>,
+    /// Whether a receive terminates TLS: the Location's `tls` setting.
+    tls: bool,
+    /// What it terminates TLS with, as the node handed it.
+    #[cfg(feature = "tls")]
+    guard: Option<transport::Guard>,
     /// The listener the first receive binds, and every receive takes from.
     receiving: Kept<TcpListener>,
 }
@@ -48,8 +68,20 @@ impl TcpTransport {
         Self {
             bind: bind.into(),
             accept_timeout: None,
+            tls: false,
+            #[cfg(feature = "tls")]
+            guard: None,
             receiving: Kept::new(),
         }
+    }
+
+    /// Terminate TLS on every connection received, with `guard`.
+    #[cfg(feature = "tls")]
+    #[must_use]
+    pub fn guarding(mut self, guard: transport::Guard) -> Self {
+        self.tls = true;
+        self.guard = Some(guard);
+        self
     }
 
     /// Give up on a connection that stops sending.
@@ -83,14 +115,40 @@ impl TcpTransport {
         // bounded as well as the reads. This did its own `accept` until
         // 2026-09-20 and blocked in it for good when nothing connected.
         let (stream, peer) = socket::accept_tcp(listener, self.accept_timeout)?;
-        Ok(Arrived::new(
-            format!("tcp://{peer}"),
-            stream,
-            Acknowledgement::at_most_once(AT_MOST_ONCE),
-        )
-        .from_peer(peer))
+        let origin = format!("tcp://{peer}");
+        let acknowledgement = Acknowledgement::at_most_once(AT_MOST_ONCE);
+        // A build without TLS never holds `tls = true`: `configured`
+        // refuses it.
+        #[cfg(feature = "tls")]
+        if self.tls {
+            return self.guarded(stream).map(|(guarded, observed)| {
+                Arrived::new(origin, guarded, acknowledgement)
+                    .from_peer(peer)
+                    .observing_all(observed)
+            });
+        }
+        Ok(Arrived::new(origin, stream, acknowledgement).from_peer(peer))
+    }
+
+    /// `stream` answered in TLS by the guard the node handed it: the
+    /// guarded connection and what its handshake proved of the client.
+    #[cfg(feature = "tls")]
+    fn guarded(
+        &self,
+        stream: std::net::TcpStream,
+    ) -> Result<(tls::GuardedServer, Vec<(String, String)>)> {
+        let guard = self
+            .guard
+            .as_ref()
+            .ok_or_else(|| transport::TransportError::permanent(NO_RECEIVE_CERTIFICATE))?;
+        guard.answer(stream)
     }
 }
+
+/// Why `tls = true` is refused by a build without TLS.
+#[cfg(not(feature = "tls"))]
+const NO_TLS: &str = "the Location terminates TLS (tls = true) and this build has no tls \
+                      feature compiled in";
 
 impl Transport for TcpTransport {
     fn name(&self) -> &'static str {
@@ -141,22 +199,50 @@ impl Configured for TcpTransport {
     /// Location connects; the one setting bounds the wait for either.
     const SETTINGS: &'static Settings = &Settings {
         technology: env!("CARGO_PKG_NAME"),
-        settings: &[Setting {
-            name: "timeout",
-            kind: Kind::Duration,
-            presence: Presence::Optional,
-            meaning: "How long a connection is waited for, accepted or opened, and how long \
-                      one that stops sending is waited on; unbounded when left out.",
-            applies: Applies::Both,
-        }],
+        settings: &[
+            Setting {
+                name: "timeout",
+                kind: Kind::Duration,
+                presence: Presence::Optional,
+                meaning: "How long a connection is waited for, accepted or opened, and how \
+                          long one that stops sending is waited on; unbounded when left out.",
+                applies: Applies::Both,
+            },
+            Setting {
+                name: "tls",
+                kind: Kind::Boolean,
+                presence: Presence::Default(Fixed::Boolean(false)),
+                meaning: "Terminate TLS on every connection: present the node's receive \
+                          certificate, [provision.receive], and verify the client's against \
+                          the anchors given there.",
+                applies: Applies::Receive,
+            },
+        ],
     };
 
     fn configured(address: &str, settings: &xcore::settings::Read) -> Result<Self> {
-        let transport = Self::new(address);
-        Ok(match settings.optional_duration("timeout") {
-            Some(timeout) => transport.timing_out_after(timeout),
-            None => transport,
-        })
+        let mut transport = Self::new(address);
+        if let Some(timeout) = settings.optional_duration("timeout") {
+            transport = transport.timing_out_after(timeout);
+        }
+        transport.tls = settings.optional_boolean("tls").unwrap_or(false);
+        #[cfg(not(feature = "tls"))]
+        if transport.tls {
+            return Err(transport::TransportError::permanent(NO_TLS));
+        }
+        Ok(transport)
+    }
+
+    /// Kept where the Location terminates TLS, and refused there without
+    /// one; a Location in the clear keeps nothing.
+    #[cfg(feature = "tls")]
+    fn guarded_by(mut self, guard: Option<&transport::Guard>) -> Result<Self> {
+        if self.tls {
+            let guard = guard
+                .ok_or_else(|| transport::TransportError::permanent(NO_RECEIVE_CERTIFICATE))?;
+            self.guard = Some(guard.clone());
+        }
+        Ok(self)
     }
 }
 
@@ -254,6 +340,125 @@ mod tests {
         // answers — no artefact at all, versus an artefact the protocol cannot
         // lock.
         assert!(TcpTransport::new("127.0.0.1:0").claims().is_none());
+    }
+
+    #[test]
+    fn tls_is_a_receive_setting_off_unless_said() {
+        let given = [("tls".to_string(), Given::Boolean(true))];
+        let refused = TcpTransport::open("127.0.0.1:0", Applies::Send, &given);
+        assert!(refused.is_err(), "a Send Location takes no tls");
+        let plain = TcpTransport::open("127.0.0.1:0", Applies::Receive, &[]).expect("plain");
+        assert!(!plain.tls);
+        let asked = TcpTransport::open("127.0.0.1:0", Applies::Receive, &given);
+        #[cfg(feature = "tls")]
+        {
+            let asked = asked.expect("read");
+            assert!(asked.tls);
+            let failure = asked.guarded_by(None).err().expect("no certificate");
+            assert_eq!(failure.message, NO_RECEIVE_CERTIFICATE);
+        }
+        #[cfg(not(feature = "tls"))]
+        assert_eq!(asked.err().expect("no tls").message, NO_TLS);
+    }
+
+    /// A test authority's PEM and signing half, and an identity
+    /// `CN=<name>` it issued, trusting it.
+    #[cfg(feature = "tls")]
+    mod issued {
+        pub(super) struct Authority(rcgen::Certificate, rcgen::KeyPair);
+
+        impl Authority {
+            pub(super) fn new() -> Self {
+                let mut params =
+                    rcgen::CertificateParams::new(Vec::<String>::new()).expect("params");
+                params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+                let key = rcgen::KeyPair::generate().expect("a key");
+                Self(params.self_signed(&key).expect("signed"), key)
+            }
+
+            pub(super) fn identity(&self, name: &str) -> tls::Identity {
+                let key = rcgen::KeyPair::generate().expect("a key");
+                let mut params =
+                    rcgen::CertificateParams::new(vec!["localhost".to_string()]).expect("params");
+                params.distinguished_name = rcgen::DistinguishedName::new();
+                params
+                    .distinguished_name
+                    .push(rcgen::DnType::CommonName, name);
+                let leaf = params.signed_by(&key, &self.0, &self.1).expect("issued");
+                tls::Identity::from_pem(
+                    leaf.pem().as_bytes(),
+                    key.serialize_pem().as_bytes(),
+                    self.0.pem().as_bytes(),
+                )
+                .expect("an identity")
+            }
+        }
+    }
+
+    /// `client` sends `payload` to `address` in TLS, ends it as TLS ends a
+    /// Stream, and reads to the server's close.
+    #[cfg(feature = "tls")]
+    fn send_guarded(address: &str, client: tls::ClientConfig, payload: &'static [u8]) {
+        use std::io::Read;
+        let tcp = std::net::TcpStream::connect(address).expect("connect");
+        let Ok(mut stream) = tls::client_with("localhost", tcp, std::sync::Arc::new(client)) else {
+            return;
+        };
+        let _ = stream.write_all(payload);
+        stream.conn.send_close_notify();
+        let _ = stream.flush();
+        let _ = stream.read_to_end(&mut Vec::new());
+    }
+
+    #[cfg(feature = "tls")]
+    #[test]
+    fn a_guarded_receive_names_the_verified_client_and_refuses_a_stranger() {
+        use context::property::{TLS_HANDSHAKE_VERIFIED, TLS_PEER_SUBJECT, TLS_PEER_VERIFIED};
+        use std::sync::Arc;
+
+        let ours = issued::Authority::new();
+        let server = ours.identity("localhost").server().expect("a server");
+        let receiver = TcpTransport::new("127.0.0.1:0")
+            .timing_out_after(LOOPBACK_TIMEOUT)
+            .guarding(transport::Guard::new(Arc::new(server)));
+        let (listener, address) = receiver.bind().expect("binding");
+
+        let to = address.clone();
+        let client = ours.identity("party-x.example").client().expect("a client");
+        let sender = std::thread::spawn(move || send_guarded(&to, client, b"order"));
+        let arrived = receiver.accept_one(&listener).expect("accepted");
+        let taken = arrived.taken().expect("read to its end");
+        sender.join().expect("the sender");
+
+        assert_eq!(taken.bytes, b"order");
+        let observed = |name: &str| {
+            taken
+                .observed
+                .iter()
+                .find(|(written, _)| written == name)
+                .map(|(_, value)| value.clone())
+        };
+        assert_eq!(
+            observed(TLS_PEER_SUBJECT).as_deref(),
+            Some("CN=party-x.example")
+        );
+        assert_eq!(
+            observed(TLS_PEER_VERIFIED).as_deref(),
+            Some(TLS_HANDSHAKE_VERIFIED)
+        );
+        ArrivalIdentity::PEER.check(&taken).expect("the peer, too");
+
+        let theirs = issued::Authority::new();
+        let stranger = theirs
+            .identity("party-y.example")
+            .client()
+            .expect("a client");
+        let to = address.clone();
+        let sender = std::thread::spawn(move || send_guarded(&to, stranger, b"order"));
+        let refused = receiver.accept_one(&listener).expect_err("a stranger");
+        sender.join().expect("the sender");
+        assert!(refused.retryable, "the next client is taken: {refused:?}");
+        assert!(refused.message.contains("handshake"), "{refused:?}");
     }
 
     #[test]

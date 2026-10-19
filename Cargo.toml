@@ -23,6 +23,20 @@ transport = { package = "xmip-core-transport", git = "https://github.com/IlleNil
 # The settings this technology declares (xcore::settings), read through
 # transport::Configured (ADR-0064, amendment 2026-09-26).
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
+# The guarded connection a receive that terminates TLS reads its body from.
+tls = { package = "xmip-core-library-tls", git = "https://github.com/IlleNilsson/xmip-core-library-tls", branch = "main", optional = true }
+
+[features]
+# A Receive Location's `tls = true`: TLS terminated with the guard the node
+# hands every transport (`transport::Guard`). Without it, `tls = true` is
+# refused in words.
+tls = ["transport/tls", "dep:tls"]
+
+[dev-dependencies]
+# A test authority, its server's and its clients' certificates. Test-only.
+rcgen = "0.13"
+# The names the arrival is read back under.
+context = { package = "xmip-core-context", git = "https://github.com/IlleNilsson/xmip-core-context", branch = "main" }
 
 [lints.rust]
 unsafe_code = "forbid"
