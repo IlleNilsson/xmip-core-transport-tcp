@@ -335,9 +335,9 @@ mod tests {
     }
 
     #[test]
-    fn a_listening_socket_has_no_artefact_to_claim() {
+    fn a_listening_socket_has_no_artifact_to_claim() {
         // ADR-0024. `None` rather than NoNativeClaim: the two are different
-        // answers — no artefact at all, versus an artefact the protocol cannot
+        // answers — no artifact at all, versus an artifact the protocol cannot
         // lock.
         assert!(TcpTransport::new("127.0.0.1:0").claims().is_none());
     }
