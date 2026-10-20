@@ -27,8 +27,12 @@ for the identity gates to claim and record as `mutual-tls`. A client the
 handshake refuses is that client's failure alone, and the Location takes the
 next. A Location asking for TLS on a node with no `receive` certificate is
 refused as it is built, and a build without the `tls` feature refuses
-`tls = true` in words (ADR-0033, amendment 2026-10-19). Sending over TLS is
-not built.
+`tls = true` in words (ADR-0033, amendment 2026-10-19). The handshake is
+read under the guard's own bound, the node's `[tuning] receive_handshake`,
+and the Location's `timeout` is put back for the content, so a client
+slower than the Location's wait between its handshake messages is answered
+and one whose content stalls is still let go after that wait (ADR-0033,
+amendment 2026-10-20). Sending over TLS is not built.
 
 ## Acknowledgement
 

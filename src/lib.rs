@@ -461,6 +461,62 @@ mod tests {
         assert!(refused.message.contains("handshake"), "{refused:?}");
     }
 
+    /// A Location's own wait: what a receive waits on a read of content.
+    #[cfg(feature = "tls")]
+    const WAIT: Duration = Duration::from_millis(100);
+
+    /// A client slower than [`WAIT`] between connecting and its handshake
+    /// is answered under the guard's own bound, and its content is then
+    /// read under the Location's wait again: a client that stops sending
+    /// content is let go after [`WAIT`], not after the guard's bound.
+    #[cfg(feature = "tls")]
+    #[test]
+    fn the_handshake_is_read_under_its_own_bound_and_the_content_under_the_wait() {
+        use std::io::Read;
+        use std::sync::Arc;
+        use std::time::Instant;
+
+        let ours = issued::Authority::new();
+        let server = ours.identity("localhost").server().expect("a server");
+        let receiver = TcpTransport::new("127.0.0.1:0")
+            .timing_out_after(WAIT)
+            .guarding(transport::Guard::new(Arc::new(server)));
+        let (listener, address) = receiver.bind().expect("binding");
+        let client = ours.identity("party-x.example").client().expect("a client");
+        let (done, finished) = std::sync::mpsc::channel::<()>();
+        let sender = std::thread::spawn(move || {
+            let tcp = std::net::TcpStream::connect(&address).expect("connect");
+            // Slower than the Location's wait before the handshake begins.
+            std::thread::sleep(WAIT * 3);
+            let stream = tls::client_with("localhost", tcp, Arc::new(client));
+            let mut stream = stream.expect("the handshake finished under the guard's bound");
+            stream.write_all(b"ord").expect("a first piece");
+            stream.flush().expect("flushed");
+            // Then it stops sending content until the node lets it go.
+            let _ = finished.recv();
+        });
+
+        let arrived = receiver.accept_one(&listener).expect("accepted");
+        let (_, mut body, _) = arrived.into_parts();
+        let mut first = [0u8; 3];
+        body.read_exact(&mut first).expect("the first piece");
+        let began = Instant::now();
+        let stalled = body.read(&mut [0u8; 1]).expect_err("the content stalled");
+        let waited = began.elapsed();
+        drop(done);
+        sender.join().expect("the sender");
+
+        assert_eq!(&first, b"ord");
+        assert!(
+            matches!(
+                stalled.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ),
+            "{stalled:?}"
+        );
+        assert!(waited < transport::guard::HANDSHAKE, "{waited:?}");
+    }
+
     #[test]
     fn a_round_hands_the_arrival_who_sent_it() {
         // `Loopback::round` holds the far end's arrival to what
