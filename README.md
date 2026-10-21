@@ -45,6 +45,14 @@ already, a node's stop drains what is queued in the listener's backlog
 before it closes it (`xmip-core-runtime`'s `receiving::drain`; ADR-0018,
 amendment 2026-10-15).
 
+A connection read to its sender's close is let go with a reset
+(`transport::ended`): everything sent was received, and neither end keeps
+the connection waiting to close, its port held for minutes. Until
+2026-10-21 the sender, closing first, kept each one waiting, and the
+runtime's tests left some 13,000 after five runs, until a connect found no
+port (ADR-0018, amendment 2026-10-21). A sender that waits for the
+receiver's close rather than closing is told of a reset.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it
