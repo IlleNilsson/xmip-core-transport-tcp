@@ -10,9 +10,7 @@
 //! connection itself, closed to end it, and has no application-level reply:
 //! the sender's write completed when its kernel took the bytes, so there is
 //! nobody left to tell the verdict. The body is the connection, read to its
-//! end as the runtime asks, and let go with a reset once its sender's close
-//! is read, so that neither end keeps it waiting to close
-//! (`transport::ended`).
+//! end as the runtime asks.
 //!
 //! **TLS, where the Location says so.** A Receive Location whose `tls`
 //! setting is `true` terminates TLS on every connection with the guard the
@@ -34,7 +32,6 @@ use transport::Arrived;
 use transport::Configured;
 use transport::Directions;
 use transport::Transport;
-use transport::ended::Ended;
 use transport::error::{Result, classify};
 use transport::kept::Kept;
 use transport::listening::{Accepting, Listening};
@@ -130,9 +127,7 @@ impl TcpTransport {
                     .observing_all(observed)
             });
         }
-        // Read to the sender's close, the connection is let go at once, so
-        // neither end waits to close (`transport::ended`).
-        Ok(Arrived::new(origin, Ended::new(stream), acknowledgement).from_peer(peer))
+        Ok(Arrived::new(origin, stream, acknowledgement).from_peer(peer))
     }
 
     /// `stream` answered in TLS by the guard the node handed it: the
