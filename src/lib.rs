@@ -368,7 +368,7 @@ mod tests {
     /// `CN=<name>` it issued, trusting it.
     #[cfg(feature = "tls")]
     mod issued {
-        pub(super) struct Authority(rcgen::Certificate, rcgen::KeyPair);
+        pub(super) struct Authority(rcgen::CertifiedIssuer<'static, rcgen::KeyPair>);
 
         impl Authority {
             pub(super) fn new() -> Self {
@@ -376,7 +376,7 @@ mod tests {
                     rcgen::CertificateParams::new(Vec::<String>::new()).expect("params");
                 params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
                 let key = rcgen::KeyPair::generate().expect("a key");
-                Self(params.self_signed(&key).expect("signed"), key)
+                Self(rcgen::CertifiedIssuer::self_signed(params, key).expect("signed"))
             }
 
             pub(super) fn identity(&self, name: &str) -> tls::Identity {
@@ -387,7 +387,7 @@ mod tests {
                 params
                     .distinguished_name
                     .push(rcgen::DnType::CommonName, name);
-                let leaf = params.signed_by(&key, &self.0, &self.1).expect("issued");
+                let leaf = params.signed_by(&key, &self.0).expect("issued");
                 tls::Identity::from_pem(
                     leaf.pem().as_bytes(),
                     key.serialize_pem().as_bytes(),
