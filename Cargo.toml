@@ -34,7 +34,7 @@ tls = ["transport/tls", "dep:tls"]
 
 [dev-dependencies]
 # A test authority, its server's and its clients' certificates. Test-only.
-rcgen = "0.13"
+rcgen = "0.14"
 # The names the arrival is read back under.
 context = { package = "xmip-core-context", git = "https://github.com/IlleNilsson/xmip-core-context", branch = "main" }
 
