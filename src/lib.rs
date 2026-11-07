@@ -353,15 +353,17 @@ mod tests {
         let plain = TcpTransport::open("127.0.0.1:0", Applies::Receive, &[]).expect("plain");
         assert!(!plain.tls);
         let asked = TcpTransport::open("127.0.0.1:0", Applies::Receive, &given);
-        #[cfg(feature = "tls")]
-        {
-            let asked = asked.expect("read");
-            assert!(asked.tls);
-            let failure = asked.guarded_by(None).err().expect("no certificate");
-            assert_eq!(failure.message, NO_RECEIVE_CERTIFICATE);
+        cfg_select! {
+            feature = "tls" => {
+                let asked = asked.expect("read");
+                assert!(asked.tls);
+                let failure = asked.guarded_by(None).err().expect("no certificate");
+                assert_eq!(failure.message, NO_RECEIVE_CERTIFICATE);
+            }
+            _ => {
+                assert_eq!(asked.err().expect("no tls").message, NO_TLS);
+            }
         }
-        #[cfg(not(feature = "tls"))]
-        assert_eq!(asked.err().expect("no tls").message, NO_TLS);
     }
 
     /// A test authority's PEM and signing half, and an identity
@@ -510,11 +512,9 @@ mod tests {
         sender.join().expect("the sender");
 
         assert_eq!(&first, b"ord");
-        assert!(
-            matches!(
-                stalled.kind(),
-                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-            ),
+        std::assert_matches!(
+            stalled.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut,
             "{stalled:?}"
         );
         assert!(waited < transport::guard::HANDSHAKE, "{waited:?}");
