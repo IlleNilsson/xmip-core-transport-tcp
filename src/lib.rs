@@ -84,13 +84,6 @@ impl TcpTransport {
         self
     }
 
-    /// Give up on a connection that stops sending.
-    #[must_use]
-    pub const fn timing_out_after(mut self, timeout: Duration) -> Self {
-        self.accept_timeout = Some(timeout);
-        self
-    }
-
     /// Bind and report the address actually assigned.
     ///
     /// Binding to port 0 lets the operating system choose, which is what a test
@@ -200,14 +193,12 @@ impl Configured for TcpTransport {
     const SETTINGS: &'static Settings = &Settings {
         technology: env!("CARGO_PKG_NAME"),
         settings: &[
-            Setting {
-                name: "timeout",
-                kind: Kind::Duration,
-                presence: Presence::Optional,
-                meaning: "How long a connection is waited for, accepted or opened, and how \
-                          long one that stops sending is waited on; unbounded when left out.",
-                applies: Applies::Both,
-            },
+            transport::configured::timeout(
+                Applies::Both,
+                None,
+                "How long a connection is waited for, accepted or opened, and how \
+                 long one that stops sending is waited on; unbounded when left out.",
+            ),
             Setting {
                 name: "tls",
                 kind: Kind::Boolean,
@@ -223,11 +214,12 @@ impl Configured for TcpTransport {
     /// The schemes a Location's address is entered with to choose this technology.
     const SCHEMES: &'static [&'static str] = &["tcp"];
 
+    fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
+        Some(&mut self.accept_timeout)
+    }
+
     fn configured(address: &str, settings: &xcore::settings::Read) -> Result<Self> {
         let mut transport = Self::new(address);
-        if let Some(timeout) = settings.optional_duration("timeout") {
-            transport = transport.timing_out_after(timeout);
-        }
         transport.tls = settings.optional_boolean("tls").unwrap_or(false);
         #[cfg(not(feature = "tls"))]
         if transport.tls {
