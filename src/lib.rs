@@ -58,7 +58,7 @@ pub struct TcpTransport {
     /// What it terminates TLS with, as the node handed it.
     #[cfg(feature = "tls")]
     guard: Option<transport::Guard>,
-    /// The listener the first receive binds, and every receive takes from.
+    /// The listener its open binds, and every receive takes from.
     receiving: Kept<TcpListener>,
 }
 
@@ -160,11 +160,11 @@ impl Transport for TcpTransport {
         transport::Waiting::Waits("the accept waits for a connection")
     }
 
-    /// One connection, from the listener the first receive bound and kept,
+    /// One connection, from the listener its open bound and kept,
     /// read to its end by the runtime. Acceptance is at-most-once here: raw
     /// TCP has no reply to defer ([`AT_MOST_ONCE`]).
     fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
-        let listener = self.receiving.bound(|| self.bind())?;
+        let listener = self.receiving.listener()?;
         Ok(vec![self.accept_one(listener)?])
     }
 
@@ -238,6 +238,12 @@ impl Configured for TcpTransport {
             self.guard = Some(guard.clone());
         }
         Ok(self)
+    }
+
+    /// The listener every receive takes from, bound where a Receive
+    /// Location listens.
+    fn listening(&self) -> Result<Option<&str>> {
+        self.receiving.listening(|| self.bind())
     }
 }
 
