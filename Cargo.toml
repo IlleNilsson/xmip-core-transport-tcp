@@ -15,8 +15,9 @@ path = "src/lib.rs"
 # (repository-model.md). The Transport trait, Arrived, Directions, the error
 # vocabulary and the line-oriented wire helpers live there. Standard library
 # otherwise, which is what lets this build on every target in
-# deployment-model.md without a cross-compilation story.
-transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+# deployment-model.md without a cross-compilation story. Its declaration
+# takes the capability's `timeout` (`transport::configured::timeout`).
+transport ={ package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
 # The settings this technology declares (xcore::settings), read through
 # transport::Configured (ADR-0064, amendment 2026-09-26).
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
@@ -24,10 +25,18 @@ xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core
 tls = { package = "xmip-core-library-tls", git = "https://github.com/IlleNilsson/xmip-core-library-tls", branch = "main", optional = true }
 
 [features]
+# The technology: its code, everything it is built on, and its declaration.
+# Without it the crate is its declaration alone (ADR-0064, amendments
+# 2026-10-22 and 2026-11-26).
+default = ["declaration"]
+# The declaration alone: what a Location of this technology is configured
+# with, `declaration::SETTINGS` and `SCHEMES`, and none of the code — what
+# the surfaces' library is to carry (open problem 48).
+declaration = []
 # A Receive Location's `tls = true`: TLS terminated with the guard the node
 # hands every transport (`transport::Guard`). Without it, `tls = true` is
-# refused in words.
-tls = ["transport/tls", "dep:tls"]
+# refused in words. The technology's code, so the default with it.
+tls = ["default", "transport/tls", "dep:tls"]
 
 [dev-dependencies]
 # A test authority, its server's and its clients' certificates. Test-only.

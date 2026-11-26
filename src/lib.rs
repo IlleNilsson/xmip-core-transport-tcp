@@ -21,34 +21,48 @@
 //! that it verified them — is written on the arrival for the identity gates
 //! (ADR-0033, amendment 2026-10-19). A client the handshake refuses is
 //! refused there, and the Location takes the next.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location of it is configured with, and none of
+//! the code above, which is behind the default feature: what the surfaces'
+//! library carries (ADR-0064, amendment 2026-11-26).
 
+#[cfg(feature = "declaration")]
+pub mod declaration;
+
+#[cfg(feature = "default")]
 use std::io::Write;
+#[cfg(feature = "default")]
 use std::net::TcpListener;
+#[cfg(feature = "default")]
 use std::time::Duration;
 
-use transport::Acknowledgement;
-use transport::ArrivalIdentity;
-use transport::Arrived;
-use transport::Configured;
-use transport::Directions;
-use transport::Transport;
+#[cfg(feature = "default")]
 use transport::error::{Result, classify};
-use transport::kept::Kept;
+#[cfg(feature = "default")]
 use transport::listening::{Accepting, Listening};
+#[cfg(feature = "default")]
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::socket;
-use transport::taken::Taken;
-use xcore::settings::{Applies, Fixed, Kind, Presence, Setting, Settings};
+#[cfg(feature = "default")]
+use transport::{
+    Acknowledgement, ArrivalIdentity, Arrived, Configured, Directions, Transport, kept::Kept,
+    socket, taken::Taken,
+};
+#[cfg(feature = "default")]
+use xcore::settings::Settings;
 
 /// Why a TCP arrival cannot be acknowledged after the receive cycle.
+#[cfg(feature = "default")]
 pub const AT_MOST_ONCE: &str = "raw TCP has no reply: the sender's write completed when its \
                                 kernel took the bytes, and closing the connection ends the Stream";
 
 /// Why a Location asking for TLS is refused where the node presents no
 /// certificate on receive.
+#[cfg(feature = "default")]
 pub const NO_RECEIVE_CERTIFICATE: &str = "the Location terminates TLS (tls = true) and the node \
      has no receive certificate to present: give it [provision.receive]";
 
+#[cfg(feature = "default")]
 #[derive(Clone)]
 pub struct TcpTransport {
     bind: String,
@@ -62,6 +76,7 @@ pub struct TcpTransport {
     receiving: Kept<TcpListener>,
 }
 
+#[cfg(feature = "default")]
 impl TcpTransport {
     #[must_use]
     pub fn new(bind: impl Into<String>) -> Self {
@@ -139,10 +154,11 @@ impl TcpTransport {
 }
 
 /// Why `tls = true` is refused by a build without TLS.
-#[cfg(not(feature = "tls"))]
+#[cfg(all(feature = "default", not(feature = "tls")))]
 const NO_TLS: &str = "the Location terminates TLS (tls = true) and this build has no tls \
                       feature compiled in";
 
+#[cfg(feature = "default")]
 impl Transport for TcpTransport {
     fn name(&self) -> &'static str {
         "tcp"
@@ -187,32 +203,10 @@ impl Transport for TcpTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Configured for TcpTransport {
-    /// The address is where a Receive Location listens and where a Send
-    /// Location connects; the one setting bounds the wait for either.
-    const SETTINGS: &'static Settings = &Settings {
-        technology: env!("CARGO_PKG_NAME"),
-        settings: &[
-            transport::configured::timeout(
-                Applies::Both,
-                None,
-                "How long a connection is waited for, accepted or opened, and how \
-                 long one that stops sending is waited on; unbounded when left out.",
-            ),
-            Setting {
-                name: "tls",
-                kind: Kind::Boolean,
-                presence: Presence::Default(Fixed::Boolean(false)),
-                meaning: "Terminate TLS on every connection: present the node's receive \
-                          certificate, [provision.receive], and verify the client's against \
-                          the anchors given there.",
-                applies: Applies::Receive,
-            },
-        ],
-    };
-
-    /// The schemes a Location's address is entered with to choose this technology.
-    const SCHEMES: &'static [&'static str] = &["tcp"];
+    const SETTINGS: &'static Settings = declaration::SETTINGS;
+    const SCHEMES: &'static [&'static str] = declaration::SCHEMES;
 
     fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
         Some(&mut self.accept_timeout)
@@ -247,6 +241,7 @@ impl Configured for TcpTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl TcpTransport {
     /// Both ends on this machine: an ephemeral local port, the loopback
     /// timeout on the accept.
@@ -256,12 +251,14 @@ impl TcpTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Accepting for TcpTransport {
     fn take_one(self, listener: &TcpListener) -> Result<Taken> {
         self.accept_one(listener)?.taken()
     }
 }
 
+#[cfg(feature = "default")]
 impl Loopback for TcpTransport {
     fn arrival_identity(&self) -> ArrivalIdentity {
         ArrivalIdentity::PEER
@@ -279,7 +276,7 @@ impl Loopback for TcpTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xcore::settings::Given;
+    use xcore::settings::{Applies, Given};
 
     #[test]
     fn tcp_declares_its_settings_and_reads_through_them() {
