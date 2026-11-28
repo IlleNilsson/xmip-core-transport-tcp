@@ -17,12 +17,12 @@ path = "src/lib.rs"
 # otherwise, which is what lets this build on every target in
 # deployment-model.md without a cross-compilation story. Its declaration
 # takes the capability's `timeout` (`transport::configured::timeout`).
-transport ={ package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+transport = { workspace = true }
 # The settings this technology declares (xcore::settings), read through
 # transport::Configured (ADR-0064, amendment 2026-09-26).
-xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
+xcore = { workspace = true }
 # The guarded connection a receive that terminates TLS reads its body from.
-tls = { package = "xmip-core-library-tls", git = "https://github.com/IlleNilsson/xmip-core-library-tls", branch = "main", optional = true }
+tls = { workspace = true, optional = true }
 
 [features]
 # The code and its declaration: the transport guide's "The declaration",
@@ -39,7 +39,7 @@ tls = ["default", "transport/tls", "dep:tls"]
 # A test authority, its server's and its clients' certificates. Test-only.
 rcgen = "0.14"
 # The names the arrival is read back under.
-context = { package = "xmip-core-context", git = "https://github.com/IlleNilsson/xmip-core-context", branch = "main" }
+context = { workspace = true }
 
 [lints]
 workspace = true
